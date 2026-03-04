@@ -191,6 +191,14 @@ interface AppContextType {
   
   // Enhanced state update methods
   createPendingMessage: (targetIP: string, content: string) => Message;
+  createPendingMultimediaMessage: (
+    targetIP: string,
+    fileId: string,
+    fileName: string,
+    fileType: 'image' | 'video',
+    fileSize: number,
+    downloadUrl: string
+  ) => Message;
   markMessageAsSent: (messageId: string) => void;
   markMessageAsFailed: (messageId: string) => void;
   updateConnectionWithReconnectAttempt: () => void;
@@ -271,6 +279,32 @@ export function AppContextProvider({ children }: AppContextProviderProps) {
     return message;
   };
 
+  const createPendingMultimediaMessage = (
+    targetIP: string,
+    fileId: string,
+    fileName: string,
+    fileType: 'image' | 'video',
+    fileSize: number,
+    downloadUrl: string
+  ): Message => {
+    const message: Message = {
+      id: generateUUID(),
+      fileId,
+      fileName,
+      fileType,
+      fileSize,
+      downloadUrl,
+      senderIP: state.currentUser?.ip || 'unknown',
+      receiverIP: targetIP,
+      timestamp: Date.now(),
+      direction: 'sent',
+      status: 'pending',
+    };
+    
+    addMessage(message);
+    return message;
+  };
+
   const markMessageAsSent = (messageId: string) => {
     console.log('markMessageAsSent called with ID:', messageId);
     updateMessageStatus(messageId, 'sent');
@@ -320,6 +354,7 @@ export function AppContextProvider({ children }: AppContextProviderProps) {
     removeOnlineUser,
     resetState,
     createPendingMessage,
+    createPendingMultimediaMessage,
     markMessageAsSent,
     markMessageAsFailed,
     updateConnectionWithReconnectAttempt,

@@ -5,6 +5,8 @@ import { MessagingGateway } from './messaging.gateway';
 import { MessageService } from '../services/message.service';
 import { UserService } from '../services/user.service';
 import { ValidationService } from '../services/validation.service';
+import { MultimediaMessageService } from '../services/multimedia-message.service';
+import { FileStorageService } from '../services/file-storage.service';
 import { MessageRepository } from '../repositories/message.repository';
 import { UserRepository } from '../repositories/user.repository';
 
@@ -23,6 +25,8 @@ describe('MessagingGateway Integration Tests', () => {
         MessageService,
         UserService,
         ValidationService,
+        MultimediaMessageService,
+        FileStorageService,
         MessageRepository,
         UserRepository,
       ],

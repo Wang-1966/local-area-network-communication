@@ -424,3 +424,207 @@ describe('MessageList', () => {
     });
   });
 });
+
+
+describe('MessageList - Multimedia Messages', () => {
+  const currentUserIP = '192.168.1.10';
+  const mockOnDownload = vi.fn();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe('Multimedia Message Rendering', () => {
+    it('should render multimedia message component for image files', () => {
+      const multimediaMessage: Message = {
+        id: 'msg-image',
+        fileId: 'file-123',
+        fileName: 'photo.jpg',
+        fileType: 'image',
+        fileSize: 1024 * 500, // 500KB
+        downloadUrl: 'http://localhost:3000/files/file-123',
+        senderIP: currentUserIP,
+        receiverIP: '192.168.1.11',
+        timestamp: Date.now(),
+        direction: 'sent',
+        status: 'sent',
+      } as any;
+
+      render(
+        <MessageList
+          messages={[multimediaMessage]}
+          currentUserIP={currentUserIP}
+          onDownloadMultimediaFile={mockOnDownload}
+        />
+      );
+
+      // Check that file information is displayed
+      expect(screen.getByText('photo.jpg')).toBeInTheDocument();
+      expect(screen.getByText(/图片/)).toBeInTheDocument();
+      expect(screen.getByText(/下载文件/)).toBeInTheDocument();
+    });
+
+    it('should render multimedia message component for video files', () => {
+      const multimediaMessage: Message = {
+        id: 'msg-video',
+        fileId: 'file-456',
+        fileName: 'video.mp4',
+        fileType: 'video',
+        fileSize: 1024 * 1024 * 5, // 5MB
+        downloadUrl: 'http://localhost:3000/files/file-456',
+        senderIP: '192.168.1.11',
+        receiverIP: currentUserIP,
+        timestamp: Date.now(),
+        direction: 'received',
+        status: 'sent',
+      } as any;
+
+      render(
+        <MessageList
+          messages={[multimediaMessage]}
+          currentUserIP={currentUserIP}
+          onDownloadMultimediaFile={mockOnDownload}
+        />
+      );
+
+      expect(screen.getByText('video.mp4')).toBeInTheDocument();
+      expect(screen.getByText(/视频/)).toBeInTheDocument();
+    });
+
+    it('should handle mixed text and multimedia messages', () => {
+      const textMessage: Message = {
+        id: 'msg-text',
+        content: 'Check out this photo!',
+        senderIP: currentUserIP,
+        receiverIP: '192.168.1.11',
+        timestamp: Date.now() - 2000,
+        direction: 'sent',
+        status: 'sent',
+      };
+
+      const multimediaMessage: Message = {
+        id: 'msg-mm',
+        fileId: 'file-123',
+        fileName: 'photo.jpg',
+        fileType: 'image',
+        fileSize: 1024 * 500,
+        downloadUrl: 'http://localhost:3000/files/file-123',
+        senderIP: currentUserIP,
+        receiverIP: '192.168.1.11',
+        timestamp: Date.now() - 1000,
+        direction: 'sent',
+        status: 'sent',
+      } as any;
+
+      render(
+        <MessageList
+          messages={[textMessage, multimediaMessage]}
+          currentUserIP={currentUserIP}
+          onDownloadMultimediaFile={mockOnDownload}
+        />
+      );
+
+      expect(screen.getByText('Check out this photo!')).toBeInTheDocument();
+      expect(screen.getByText('photo.jpg')).toBeInTheDocument();
+    });
+  });
+
+  describe('Multimedia Message Status', () => {
+    it('should display status for sent multimedia messages', () => {
+      const pendingMultimediaMessage: Message = {
+        id: 'msg-pending-mm',
+        fileId: 'file-pending',
+        fileName: 'pending.jpg',
+        fileType: 'image',
+        fileSize: 1024 * 100,
+        downloadUrl: 'http://localhost:3000/files/file-pending',
+        senderIP: currentUserIP,
+        receiverIP: '192.168.1.11',
+        timestamp: Date.now(),
+        direction: 'sent',
+        status: 'pending',
+      } as any;
+
+      render(
+        <MessageList
+          messages={[pendingMultimediaMessage]}
+          currentUserIP={currentUserIP}
+          onDownloadMultimediaFile={mockOnDownload}
+        />
+      );
+
+      expect(screen.getByText('发送中...')).toBeInTheDocument();
+    });
+
+    it('should not display status for received multimedia messages', () => {
+      const receivedMultimediaMessage: Message = {
+        id: 'msg-received-mm',
+        fileId: 'file-received',
+        fileName: 'received.jpg',
+        fileType: 'image',
+        fileSize: 1024 * 100,
+        downloadUrl: 'http://localhost:3000/files/file-received',
+        senderIP: '192.168.1.11',
+        receiverIP: currentUserIP,
+        timestamp: Date.now(),
+        direction: 'received',
+        status: 'sent',
+      } as any;
+
+      render(
+        <MessageList
+          messages={[receivedMultimediaMessage]}
+          currentUserIP={currentUserIP}
+          onDownloadMultimediaFile={mockOnDownload}
+        />
+      );
+
+      // Status should not be displayed for received messages
+      const statusElements = screen.queryAllByText(/已发送|发送中|发送失败/);
+      expect(statusElements.length).toBe(0);
+    });
+  });
+
+  describe('Multimedia Message Direction', () => {
+    it('should distinguish sent and received multimedia messages by color', () => {
+      const sentMultimediaMessage: Message = {
+        id: 'msg-sent-mm',
+        fileId: 'file-sent',
+        fileName: 'sent.jpg',
+        fileType: 'image',
+        fileSize: 1024 * 100,
+        downloadUrl: 'http://localhost:3000/files/file-sent',
+        senderIP: currentUserIP,
+        receiverIP: '192.168.1.11',
+        timestamp: Date.now() - 1000,
+        direction: 'sent',
+        status: 'sent',
+      } as any;
+
+      const receivedMultimediaMessage: Message = {
+        id: 'msg-received-mm',
+        fileId: 'file-received',
+        fileName: 'received.jpg',
+        fileType: 'image',
+        fileSize: 1024 * 100,
+        downloadUrl: 'http://localhost:3000/files/file-received',
+        senderIP: '192.168.1.11',
+        receiverIP: currentUserIP,
+        timestamp: Date.now(),
+        direction: 'received',
+        status: 'sent',
+      } as any;
+
+      render(
+        <MessageList
+          messages={[sentMultimediaMessage, receivedMultimediaMessage]}
+          currentUserIP={currentUserIP}
+          onDownloadMultimediaFile={mockOnDownload}
+        />
+      );
+
+      expect(screen.getByText('sent.jpg')).toBeInTheDocument();
+      expect(screen.getByText('received.jpg')).toBeInTheDocument();
+    });
+  });
+});

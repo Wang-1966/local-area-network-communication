@@ -16,6 +16,7 @@ export const defaultConfig: AppConfig = {
   maxReconnectAttempts: parseInt(process.env.MAX_RECONNECT_ATTEMPTS || '5', 10),
   corsOrigin: process.env.CORS_ORIGIN || '*',
   staticAssetsPath: process.env.STATIC_ASSETS_PATH || join(__dirname, '..', '..', '..', 'client', 'dist'),
+  uploadsPath: process.env.UPLOADS_PATH || join(__dirname, '..', '..', '..', 'uploads'),
 };
 
 /**

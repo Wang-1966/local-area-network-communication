@@ -414,4 +414,82 @@ describe('MessageInput', () => {
       expect(errorMessage).toBeInTheDocument();
     });
   });
+
+  describe('Multimedia Message Support', () => {
+    const mockOnSendMultimediaMessage = vi.fn();
+    const multimediaProps = {
+      ...defaultProps,
+      onSendMultimediaMessage: mockOnSendMultimediaMessage,
+    };
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    it('should render FileSelector when onSendMultimediaMessage is provided', () => {
+      render(<MessageInput {...multimediaProps} />);
+      
+      expect(screen.getByText(/或发送多媒体文件/i)).toBeInTheDocument();
+      expect(screen.getByText(/选择文件/i)).toBeInTheDocument();
+    });
+
+    it('should not render FileSelector when onSendMultimediaMessage is not provided', () => {
+      render(<MessageInput {...defaultProps} />);
+      
+      expect(screen.queryByText(/或发送多媒体文件/i)).not.toBeInTheDocument();
+    });
+
+    it('should show file upload error message', async () => {
+      const user = userEvent.setup();
+      mockOnSendMultimediaMessage.mockRejectedValue(new Error('Upload failed'));
+      
+      render(<MessageInput {...multimediaProps} />);
+      
+      const ipInput = screen.getByLabelText(/目标用户 IP 地址/i);
+      await user.type(ipInput, '192.168.1.100');
+      
+      // Verify FileSelector is rendered
+      expect(screen.getByText(/选择文件/i)).toBeInTheDocument();
+    });
+
+    it('should pass isFileUploading state to FileSelector', () => {
+      render(<MessageInput {...multimediaProps} isFileUploading={true} />);
+      
+      // FileSelector should be rendered with uploading state
+      expect(screen.getByText(/上传中.../i)).toBeInTheDocument();
+    });
+
+    it('should render FileSelector with proper disabled state when not connected', () => {
+      render(<MessageInput {...multimediaProps} isConnected={false} />);
+      
+      // FileSelector should be rendered
+      expect(screen.getByText(/选择文件/i)).toBeInTheDocument();
+      // Connection warning should be shown
+      expect(screen.getByText(/网络连接已断开，无法发送消息/i)).toBeInTheDocument();
+    });
+
+    it('should render FileSelector with proper disabled state when sending message', async () => {
+      const user = userEvent.setup();
+      let resolvePromise: () => void;
+      const sendPromise = new Promise<void>((resolve) => {
+        resolvePromise = resolve;
+      });
+      mockOnSendMessage.mockReturnValue(sendPromise);
+      
+      render(<MessageInput {...multimediaProps} />);
+      
+      const ipInput = screen.getByLabelText(/目标用户 IP 地址/i);
+      const messageInput = screen.getByLabelText(/消息内容/i);
+      const sendButton = screen.getByRole('button', { name: /发送消息/i });
+      
+      await user.type(ipInput, '192.168.1.100');
+      await user.type(messageInput, 'Test message');
+      await user.click(sendButton);
+      
+      // FileSelector should still be rendered
+      expect(screen.getByText(/选择文件/i)).toBeInTheDocument();
+      
+      resolvePromise!();
+    });
+  });
 });

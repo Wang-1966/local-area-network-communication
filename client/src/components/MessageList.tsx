@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { Message } from '../types';
+import { MultimediaMessage } from './MultimediaMessage';
 
 /**
  * Props for MessageList component
@@ -7,6 +8,7 @@ import { Message } from '../types';
 interface MessageListProps {
   messages: Message[];
   currentUserIP: string;
+  onDownloadMultimediaFile?: (fileId: string, fileName: string) => void;
 }
 
 /**
@@ -18,11 +20,13 @@ interface MessageListProps {
  * - Display message status (pending/sent/failed)
  * - Auto-scroll to bottom when receiving new messages
  * - Display empty state hint
+ * - Support for multimedia messages (images and videos)
+ * - Download links for multimedia files
  * - Responsive design with Tailwind CSS
  * 
  * Requirements: 3.1, 3.2, 3.3, 3.4, 5.1, 5.2, 5.3, 5.4, 5.5, 8.2, 8.5
  */
-export function MessageList({ messages, currentUserIP }: MessageListProps) {
+export function MessageList({ messages, currentUserIP, onDownloadMultimediaFile }: MessageListProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
 
@@ -100,6 +104,19 @@ export function MessageList({ messages, currentUserIP }: MessageListProps) {
   };
 
   /**
+   * Check if message is a multimedia message
+   */
+  const isMultimediaMessage = (message: Message): boolean => {
+    return (
+      'fileId' in message &&
+      'fileName' in message &&
+      'fileType' in message &&
+      'fileSize' in message &&
+      'downloadUrl' in message
+    );
+  };
+
+  /**
    * Get message bubble styling based on direction
    */
   const getMessageBubbleClass = (message: Message): string => {
@@ -154,6 +171,8 @@ export function MessageList({ messages, currentUserIP }: MessageListProps) {
       {/* Messages */}
       {messages.map((message) => {
         const isSent = isSentByCurrentUser(message);
+        const isMultimedia = isMultimediaMessage(message);
+
         return (
           <div
             key={message.id}
@@ -173,14 +192,22 @@ export function MessageList({ messages, currentUserIP }: MessageListProps) {
                 </span>
               </div>
 
-              {/* Message Bubble */}
-              <div
-                className={`rounded-lg border-2 px-3 py-2 ${getMessageBubbleClass(
-                  message
-                )}`}
-              >
-                <p className="text-sm md:text-base break-words">{message.content}</p>
-              </div>
+              {/* Message Bubble - Multimedia or Text */}
+              {isMultimedia ? (
+                <MultimediaMessage
+                  message={message as any}
+                  isOwnMessage={isSent}
+                  onDownload={onDownloadMultimediaFile}
+                />
+              ) : (
+                <div
+                  className={`rounded-lg border-2 px-3 py-2 ${getMessageBubbleClass(
+                    message
+                  )}`}
+                >
+                  <p className="text-sm md:text-base break-words">{message.content}</p>
+                </div>
+              )}
 
               {/* Message Status (only for sent messages) */}
               {isSent && (

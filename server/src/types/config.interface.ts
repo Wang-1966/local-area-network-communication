@@ -11,6 +11,7 @@ export interface AppConfig {
   maxReconnectAttempts: number; // 最大重连次数（默认5）
   corsOrigin: string;      // CORS允许的源（生产环境应设置为特定域名）
   staticAssetsPath: string; // 前端静态资源路径（默认'./client/dist'）
+  uploadsPath: string;     // 文件上传目录路径（默认'./uploads'）
 }
 
 /**

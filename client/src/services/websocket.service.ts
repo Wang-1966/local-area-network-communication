@@ -1,6 +1,7 @@
 import { io, Socket } from 'socket.io-client';
 import type {
   SendMessageDto,
+  SendMultimediaMessageDto,
   ConnectedEvent,
   OnlineUsersUpdateEvent,
   UserJoinedEvent,
@@ -8,6 +9,7 @@ import type {
   MessageErrorEvent,
   NewMessageEvent,
   MessageSentEvent,
+  MultimediaMessageSentEvent,
   MessageHistoryEvent,
   GetMessageHistoryDto,
 } from '../types';
@@ -28,6 +30,22 @@ export class WebSocketService {
    * @param url - Server URL (default: backend server)
    */
   connect(url?: string): void {
+    console.log('[WebSocket] Starting connection...');
+    
+    // Prevent multiple connections
+    if (this.socket && this.socket.connected) {
+      console.log('[WebSocket] Already connected, skipping');
+      return;
+    }
+
+    // Disconnect existing socket if any
+    if (this.socket) {
+      console.log('[WebSocket] Cleaning up existing socket');
+      this.socket.removeAllListeners();
+      this.socket.disconnect();
+      this.socket = null;
+    }
+
     // In development, try to connect to the backend server's LAN IP
     // In production, use the same origin
     let serverUrl = url;
@@ -42,9 +60,14 @@ export class WebSocketService {
       }
     }
 
+    console.log('[WebSocket] Connecting to:', serverUrl);
+
+    // iOS Safari works better with polling first, then upgrade to websocket
     this.socket = io(serverUrl, {
-      transports: ['websocket', 'polling'],
+      transports: ['polling', 'websocket'], // Try polling first for iOS compatibility
       reconnection: false, // We'll handle reconnection manually
+      timeout: 10000, // 10 second timeout
+      forceNew: true, // Force a new connection
     });
 
     this.setupEventHandlers();
@@ -101,6 +124,25 @@ export class WebSocketService {
   }
 
   /**
+   * Send a multimedia message to a target user
+   * @param targetIP - Target user's IP address
+   * @param fileId - File ID from storage service
+   * @param messageId - Optional message ID from frontend
+   */
+  sendMultimediaMessage(targetIP: string, fileId: string, messageId?: string): void {
+    if (!this.socket || !this.socket.connected) {
+      throw new Error('Socket not connected');
+    }
+
+    const payload: SendMultimediaMessageDto = {
+      targetIP,
+      fileId,
+      messageId,
+    };
+    this.socket.emit('sendMultimediaMessage', payload);
+  }
+
+  /**
    * Request the list of online users
    */
   getOnlineUsers(): void {
@@ -128,8 +170,11 @@ export class WebSocketService {
    */
   on(event: 'connected', handler: (data: ConnectedEvent) => void): void;
   on(event: 'newMessage', handler: (data: NewMessageEvent) => void): void;
+  on(event: 'newMultimediaMessage', handler: (data: NewMessageEvent) => void): void;
   on(event: 'messageSent', handler: (data: MessageSentEvent) => void): void;
+  on(event: 'multimediaMessageSent', handler: (data: MultimediaMessageSentEvent) => void): void;
   on(event: 'messageError', handler: (data: MessageErrorEvent) => void): void;
+  on(event: 'multimediaMessageError', handler: (data: MessageErrorEvent) => void): void;
   on(event: 'onlineUsersUpdate', handler: (data: OnlineUsersUpdateEvent) => void): void;
   on(event: 'userJoined', handler: (data: UserJoinedEvent) => void): void;
   on(event: 'userLeft', handler: (data: UserLeftEvent) => void): void;
@@ -165,12 +210,16 @@ export class WebSocketService {
    */
   private setupEventHandlers(): void {
     if (!this.socket) {
+      console.error('[WebSocket] Cannot setup handlers: socket is null');
       return;
     }
 
+    console.log('[WebSocket] Setting up event handlers');
+
     // Handle successful connection
     this.socket.on('connect', () => {
-      console.log('WebSocket connected');
+      console.log('[WebSocket] ✅ Connected successfully');
+      console.log('[WebSocket] Transport:', this.socket?.io.engine.transport.name);
       this.reconnectAttempts = 0;
       if (this.reconnectTimeout) {
         clearTimeout(this.reconnectTimeout);
@@ -180,7 +229,7 @@ export class WebSocketService {
 
     // Handle disconnection
     this.socket.on('disconnect', (reason: string) => {
-      console.log('WebSocket disconnected:', reason);
+      console.log('[WebSocket] ❌ Disconnected:', reason);
       
       // Attempt reconnection if not manually disconnected
       if (reason !== 'io client disconnect') {
@@ -190,9 +239,16 @@ export class WebSocketService {
 
     // Handle connection errors
     this.socket.on('connect_error', (error: Error) => {
-      console.error('WebSocket connection error:', error);
+      console.error('[WebSocket] ⚠️ Connection error:', error.message);
       this.attemptReconnect();
     });
+
+    // Handle transport upgrade (polling -> websocket)
+    this.socket.io.engine.on('upgrade', (transport: any) => {
+      console.log('[WebSocket] 🔄 Transport upgraded to:', transport.name);
+    });
+
+    console.log('[WebSocket] Event handlers setup complete');
   }
 
   /**
@@ -200,19 +256,21 @@ export class WebSocketService {
    */
   private attemptReconnect(): void {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error('Max reconnection attempts reached');
+      console.error('[WebSocket] Max reconnection attempts reached');
       return;
     }
 
     if (this.reconnectTimeout) {
+      console.log('[WebSocket] Reconnection already scheduled');
       return; // Already attempting to reconnect
     }
 
     this.reconnectAttempts++;
-    console.log(`Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
+    console.log(`[WebSocket] 🔄 Scheduling reconnect attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${this.reconnectDelay}ms`);
 
     this.reconnectTimeout = setTimeout(() => {
       this.reconnectTimeout = null;
+      console.log(`[WebSocket] Executing reconnect attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}`);
       
       if (this.socket && !this.socket.connected) {
         this.socket.connect();

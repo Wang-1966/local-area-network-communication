@@ -649,6 +649,292 @@ describe('LAN Messaging App - E2E Integration Tests', () => {
     });
   });
 
+  describe('Multimedia Backend Integration Tests', () => {
+    describe('File Upload and Download Flow', () => {
+      it('should upload a file and retrieve it successfully', async () => {
+        const fs = require('fs');
+        const path = require('path');
+        const request = require('supertest');
+
+        // Create a test file
+        const testFilePath = path.join(__dirname, 'test-image.jpg');
+        const testFileContent = Buffer.from([0xff, 0xd8, 0xff, 0xe0]); // JPEG header
+        fs.writeFileSync(testFilePath, testFileContent);
+
+        try {
+          // Upload file
+          const uploadResponse = await request(server)
+            .post('/files/upload')
+            .attach('file', testFilePath);
+
+          expect(uploadResponse.status).toBe(201);
+          expect(uploadResponse.body.success).toBe(true);
+          expect(uploadResponse.body.fileId).toBeDefined();
+          expect(uploadResponse.body.fileName).toBe('test-image.jpg');
+          expect(uploadResponse.body.fileType).toBe('image');
+
+          const fileId = uploadResponse.body.fileId;
+
+          // Download file
+          const downloadResponse = await request(server).get(`/files/${fileId}`);
+
+          expect(downloadResponse.status).toBe(200);
+          expect(downloadResponse.body).toBeDefined();
+        } finally {
+          // Cleanup
+          if (fs.existsSync(testFilePath)) {
+            fs.unlinkSync(testFilePath);
+          }
+        }
+      });
+
+      it('should reject files exceeding size limit', async () => {
+        const fs = require('fs');
+        const path = require('path');
+        const request = require('supertest');
+
+        // Create a file exceeding 10MB limit
+        const testFilePath = path.join(__dirname, 'large-file.jpg');
+        const largeBuffer = Buffer.alloc(11 * 1024 * 1024); // 11MB
+        fs.writeFileSync(testFilePath, largeBuffer);
+
+        try {
+          const response = await request(server)
+            .post('/files/upload')
+            .attach('file', testFilePath);
+
+          // Multer returns 413 Payload Too Large for files exceeding size limit
+          expect(response.status).toBe(413);
+        } finally {
+          if (fs.existsSync(testFilePath)) {
+            fs.unlinkSync(testFilePath);
+          }
+        }
+      });
+
+      it('should reject unsupported file formats', async () => {
+        const fs = require('fs');
+        const path = require('path');
+        const request = require('supertest');
+
+        // Create a test file with unsupported format
+        const testFilePath = path.join(__dirname, 'test-file.txt');
+        fs.writeFileSync(testFilePath, 'This is a text file');
+
+        try {
+          const response = await request(server)
+            .post('/files/upload')
+            .attach('file', testFilePath);
+
+          expect(response.status).toBe(400);
+          expect(response.body.success).toBe(false);
+          expect(response.body.error.code).toBe('UNSUPPORTED_FORMAT');
+        } finally {
+          if (fs.existsSync(testFilePath)) {
+            fs.unlinkSync(testFilePath);
+          }
+        }
+      });
+    });
+
+    describe('Multimedia Message Creation and Retrieval', () => {
+      it('should create multimedia message with file reference', async () => {
+        const fs = require('fs');
+        const path = require('path');
+        const request = require('supertest');
+
+        // Create and upload a test image
+        const testFilePath = path.join(__dirname, 'test-image.jpg');
+        const testFileContent = Buffer.from([0xff, 0xd8, 0xff, 0xe0]); // JPEG header
+        fs.writeFileSync(testFilePath, testFileContent);
+
+        try {
+          // Upload file
+          const uploadResponse = await request(server)
+            .post('/files/upload')
+            .attach('file', testFilePath);
+
+          expect(uploadResponse.status).toBe(201);
+          const fileId = uploadResponse.body.fileId;
+
+          // Get file info
+          const infoResponse = await request(server).get(`/files/${fileId}/info`);
+
+          expect(infoResponse.status).toBe(200);
+          expect(infoResponse.body.fileId).toBe(fileId);
+          expect(infoResponse.body.fileName).toBe('test-image.jpg');
+          expect(infoResponse.body.fileType).toBe('image');
+          expect(infoResponse.body.fileSize).toBeGreaterThan(0);
+          expect(infoResponse.body.uploadedAt).toBeDefined();
+        } finally {
+          if (fs.existsSync(testFilePath)) {
+            fs.unlinkSync(testFilePath);
+          }
+        }
+      });
+
+      it('should return 404 for non-existent file', async () => {
+        const request = require('supertest');
+
+        const response = await request(server).get('/files/non-existent-id');
+
+        expect(response.status).toBe(404);
+        expect(response.body.success).toBe(false);
+        expect(response.body.error.code).toBe('FILE_NOT_FOUND');
+      });
+    });
+
+    describe('WebSocket Multimedia Message Transmission', () => {
+      it('should send multimedia message via WebSocket', (done) => {
+        const fs = require('fs');
+        const path = require('path');
+        const request = require('supertest');
+
+        const client1 = io(BASE_URL, {
+          reconnection: false,
+          transports: ['websocket'],
+        });
+        const client2 = io(BASE_URL, {
+          reconnection: false,
+          transports: ['websocket'],
+        });
+
+        let client1IP: string;
+        let client2IP: string;
+        let fileId: string;
+        let multimediaMessageReceived = false;
+        let testComplete = false;
+
+        client1.on('connected', (data: any) => {
+          client1IP = data.user.ip;
+        });
+
+        client2.on('connected', (data: any) => {
+          client2IP = data.user.ip;
+
+          // Upload a file first
+          const testFilePath = path.join(__dirname, 'test-image.jpg');
+          const testFileContent = Buffer.from([0xff, 0xd8, 0xff, 0xe0]); // JPEG header
+          fs.writeFileSync(testFilePath, testFileContent);
+
+          request(server)
+            .post('/files/upload')
+            .attach('file', testFilePath)
+            .then((uploadResponse: any) => {
+              fileId = uploadResponse.body.fileId;
+
+              // Send multimedia message
+              setTimeout(() => {
+                client1.emit('sendMultimediaMessage', {
+                  targetIP: client2IP,
+                  fileId: fileId,
+                });
+              }, 200);
+
+              // Cleanup
+              if (fs.existsSync(testFilePath)) {
+                fs.unlinkSync(testFilePath);
+              }
+            });
+        });
+
+        client2.on('newMultimediaMessage', (data: any) => {
+          const message = data.message || data;
+          expect(message).toBeDefined();
+          expect(message.fileId).toBe(fileId);
+          expect(message.type).toMatch(/image|video/);
+          multimediaMessageReceived = true;
+          if (multimediaMessageReceived && !testComplete) {
+            testComplete = true;
+            client1.disconnect();
+            client2.disconnect();
+            done();
+          }
+        });
+
+        setTimeout(() => {
+          if (!testComplete) {
+            testComplete = true;
+            client1.disconnect();
+            client2.disconnect();
+            done(new Error('Multimedia message not received via WebSocket'));
+          }
+        }, 5000);
+      });
+
+      it('should broadcast multimedia message to all connected users', (done) => {
+        const fs = require('fs');
+        const path = require('path');
+        const request = require('supertest');
+
+        const clients = [
+          io(BASE_URL, { reconnection: false, transports: ['websocket'] }),
+          io(BASE_URL, { reconnection: false, transports: ['websocket'] }),
+          io(BASE_URL, { reconnection: false, transports: ['websocket'] }),
+        ];
+
+        const clientIPs: string[] = [];
+        let fileId: string;
+        const messagesReceived: number[] = [0, 0, 0];
+        let testComplete = false;
+
+        clients.forEach((client, index) => {
+          client.on('connected', (data: any) => {
+            clientIPs[index] = data.user.ip;
+
+            if (clientIPs.filter((ip) => ip).length === 3) {
+              // All clients connected, upload file and send multimedia message
+              const testFilePath = path.join(__dirname, 'test-image.jpg');
+              const testFileContent = Buffer.from([0xff, 0xd8, 0xff, 0xe0]); // JPEG header
+              fs.writeFileSync(testFilePath, testFileContent);
+
+              request(server)
+                .post('/files/upload')
+                .attach('file', testFilePath)
+                .then((uploadResponse: any) => {
+                  fileId = uploadResponse.body.fileId;
+
+                  // Send multimedia message from client 0
+                  setTimeout(() => {
+                    clients[0].emit('sendMultimediaMessage', {
+                      targetIP: clientIPs[1],
+                      fileId: fileId,
+                    });
+                  }, 200);
+
+                  // Cleanup
+                  if (fs.existsSync(testFilePath)) {
+                    fs.unlinkSync(testFilePath);
+                  }
+                });
+            }
+          });
+
+          client.on('newMultimediaMessage', () => {
+            messagesReceived[index]++;
+            checkCompletion();
+          });
+        });
+
+        const checkCompletion = () => {
+          if (messagesReceived[1] > 0 && !testComplete) {
+            testComplete = true;
+            clients.forEach((client) => client.disconnect());
+            done();
+          }
+        };
+
+        setTimeout(() => {
+          if (!testComplete) {
+            testComplete = true;
+            clients.forEach((client) => client.disconnect());
+            done(new Error('Multimedia message broadcast failed'));
+          }
+        }, 6000);
+      });
+    });
+  });
+
   describe('16.2 Performance Testing (Optional)', () => {
     describe('Multiple Concurrent Connections', () => {
       it('should handle 10 concurrent connections', (done) => {

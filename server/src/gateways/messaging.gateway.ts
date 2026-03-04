@@ -16,9 +16,16 @@ import {
   MessageResponse,
   GetMessageHistoryDto,
 } from '../types';
+import {
+  SendMultimediaMessageDto,
+  MultimediaMessageResponse,
+  MultimediaMessage,
+} from '../types/multimedia.interface';
 import { MessageService } from '../services/message.service';
 import { UserService } from '../services/user.service';
 import { ValidationService } from '../services/validation.service';
+import { MultimediaMessageService } from '../services/multimedia-message.service';
+import { FileStorageService } from '../services/file-storage.service';
 
 /**
  * Messaging Gateway - 处理所有WebSocket连接和事件
@@ -40,6 +47,8 @@ export class MessagingGateway
     private readonly messageService: MessageService,
     private readonly userService: UserService,
     private readonly validationService: ValidationService,
+    private readonly multimediaMessageService: MultimediaMessageService,
+    private readonly fileStorageService: FileStorageService,
   ) {}
 
   /**
@@ -198,6 +207,117 @@ export class MessagingGateway
   }
 
   /**
+   * 处理发送多媒体消息事件
+   */
+  @SubscribeMessage('sendMultimediaMessage')
+  async handleSendMultimediaMessage(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: SendMultimediaMessageDto,
+  ): Promise<MultimediaMessageResponse> {
+    try {
+      this.logger.log(
+        `Multimedia message from ${client.id} to ${payload.targetIP}, fileId: ${payload.fileId}`,
+      );
+
+      // 验证多媒体消息请求
+      const validation =
+        this.multimediaMessageService.validateMultimediaMessageRequest(payload);
+      if (!validation.isValid) {
+        this.logger.warn(`Multimedia validation failed: ${validation.error}`);
+        client.emit('multimediaMessageError', {
+          error: validation.error,
+          code: 'INVALID_INPUT',
+        });
+        return {
+          success: false,
+          error: validation.error,
+        };
+      }
+
+      // 查找发送方用户
+      const sender = this.userService.findUserBySocketId(client.id);
+      if (!sender) {
+        const error = '发送方用户未找到';
+        this.logger.warn(error);
+        client.emit('multimediaMessageError', {
+          error,
+          code: 'UNKNOWN',
+        });
+        return {
+          success: false,
+          error,
+        };
+      }
+
+      // 查找目标用户
+      const targetUser = this.userService.findUserByIP(payload.targetIP);
+      if (!targetUser || !targetUser.isOnline) {
+        const error = '目标用户不在线';
+        this.logger.warn(`Target user ${payload.targetIP} is offline`);
+        client.emit('multimediaMessageError', {
+          error,
+          code: 'USER_OFFLINE',
+        });
+        return {
+          success: false,
+          error,
+        };
+      }
+
+      // 获取文件信息（从存储服务）
+      const fileInfo = await this.fileStorageService.getFile(
+        payload.fileId,
+      );
+      if (!fileInfo) {
+        const error = '文件未找到';
+        this.logger.warn(`File ${payload.fileId} not found`);
+        client.emit('multimediaMessageError', {
+          error,
+          code: 'FILE_NOT_FOUND',
+        });
+        return {
+          success: false,
+          error,
+        };
+      }
+
+      // 创建多媒体消息
+      const message = this.multimediaMessageService.createMultimediaMessage(
+        sender.ip,
+        payload.targetIP,
+        fileInfo,
+      );
+
+      // 广播多媒体消息给所有连接的用户
+      this.broadcastMultimediaMessage(message);
+
+      // 发送确认给发送方
+      client.emit('multimediaMessageSent', message);
+
+      this.logger.log(`Multimedia message sent successfully: ${message.id}`);
+
+      return {
+        success: true,
+        message,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Send multimedia message error: ${error.message}`,
+        error.stack,
+      );
+      client.emit('multimediaMessageError', {
+        error: '多媒体消息发送失败',
+        code: 'SEND_FAILED',
+      });
+      return {
+        success: false,
+        error: '多媒体消息发送失败',
+      };
+    }
+  }
+
+
+  /**
    * 处理获取在线用户事件
    */
   @SubscribeMessage('getOnlineUsers')
@@ -244,14 +364,14 @@ export class MessagingGateway
       let messages: Message[];
 
       if (payload.targetIP) {
-        // 获取与特定用户的对话
+        // 获取与特定用户的对话（包括多媒体消息）
         messages = this.messageService.getConversation(
           user.ip,
           payload.targetIP,
           payload.limit || 100,
         );
       } else {
-        // 获取用户的所有消息
+        // 获取用户的所有消息（包括多媒体消息）
         messages = this.messageService.getUserMessageHistory(
           user.ip,
           payload.limit || 100,
@@ -291,6 +411,21 @@ export class MessagingGateway
       }
     } catch (error) {
       this.logger.error(`Error sending message to socket: ${error.message}`, error.stack);
+    }
+  }
+
+  /**
+   * 广播多媒体消息给所有连接的用户（内部方法）
+   */
+  private broadcastMultimediaMessage(message: MultimediaMessage): void {
+    try {
+      this.server.emit('newMultimediaMessage', message);
+      this.logger.log(`Multimedia message broadcasted: ${message.id}`);
+    } catch (error) {
+      this.logger.error(
+        `Error broadcasting multimedia message: ${error.message}`,
+        error.stack,
+      );
     }
   }
 

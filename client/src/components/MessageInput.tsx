@@ -1,15 +1,18 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { User } from '../types';
+import { FileSelector } from './FileSelector';
 
 /**
  * Props for MessageInput component
  */
 interface MessageInputProps {
   onSendMessage: (targetUserIP: string, content: string) => Promise<void>;
+  onSendMultimediaMessage?: (targetUserIP: string, file: File) => Promise<void>;
   onlineUsers: User[];
   isConnected: boolean;
   selectedUserIP?: string;
   isLoading?: boolean;
+  isFileUploading?: boolean;
 }
 
 /**
@@ -22,16 +25,20 @@ interface MessageInputProps {
  * - Send button with conditional enable/disable
  * - Enter key to send (Shift+Enter for new line)
  * - Loading state display
+ * - Integrated FileSelector for multimedia messages
+ * - File upload status display
  * - Responsive design with Tailwind CSS
  * 
  * Requirements: 1.1, 1.2, 1.3, 2.5, 2.6, 2.7, 6.1, 6.2, 6.3, 6.4, 6.5, 8.3, 8.4
  */
 export function MessageInput({ 
   onSendMessage, 
+  onSendMultimediaMessage,
   onlineUsers, 
   isConnected, 
   selectedUserIP = '',
-  isLoading = false 
+  isLoading = false,
+  isFileUploading = false
 }: MessageInputProps) {
   const [targetIP, setTargetIP] = useState(selectedUserIP);
   const [messageContent, setMessageContent] = useState('');
@@ -39,6 +46,7 @@ export function MessageInput({
   const [messageError, setMessageError] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [fileUploadError, setFileUploadError] = useState<string | null>(null);
   
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const ipInputRef = useRef<HTMLInputElement>(null);
@@ -107,9 +115,9 @@ export function MessageInput({
   };
 
   /**
-   * Handle key press in textarea
+   * Handle key down in textarea
    */
-  const handleTextareaKeyPress = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+  const handleTextareaKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       handleSendMessage();
@@ -185,6 +193,31 @@ export function MessageInput({
   };
 
   /**
+   * Handle file selection for multimedia message
+   */
+  const handleFileSelected = async (file: File) => {
+    if (!onSendMultimediaMessage) {
+      setFileUploadError('多媒体消息功能未启用');
+      return;
+    }
+
+    const trimmedIP = targetIP.trim();
+    
+    // Validate target IP
+    if (!trimmedIP || !validateIPAddress(trimmedIP)) {
+      setFileUploadError('请先选择有效的目标用户IP地址');
+      return;
+    }
+
+    try {
+      setFileUploadError(null);
+      await onSendMultimediaMessage(trimmedIP, file);
+    } catch (error) {
+      setFileUploadError(error instanceof Error ? error.message : '文件上传失败');
+    }
+  };
+
+  /**
    * Handle input blur to hide suggestions
    */
   const handleIPInputBlur = () => {
@@ -204,6 +237,11 @@ export function MessageInput({
   const filteredSuggestions = getFilteredSuggestions();
   const characterCount = messageContent.length;
   const isOverLimit = characterCount > MAX_MESSAGE_LENGTH;
+
+  // Debug: Log loading states
+  useEffect(() => {
+    console.log('[MessageInput] isLoading:', isLoading, 'isSending:', isSending);
+  }, [isLoading, isSending]);
 
   return (
     <div className="bg-white rounded-lg shadow-md p-3 md:p-4 space-y-3 md:space-y-4">
@@ -239,22 +277,27 @@ export function MessageInput({
             disabled={isSending || isLoading}
           />
           
-          {/* Auto-fill icon */}
-          <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-            <svg
-              className="h-4 w-4 text-gray-400"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
+          {/* Clear button - only show when there's text */}
+          {targetIP && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setTargetIP('');
+                setIpError('');
+                setShowSuggestions(false);
+                if (ipInputRef.current) {
+                  ipInputRef.current.focus();
+                }
+              }}
+              className="absolute inset-y-0 right-0 pr-3 flex items-center hover:opacity-70 transition-opacity z-10"
+              disabled={isSending || isLoading}
+              tabIndex={-1}
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-              />
-            </svg>
-          </div>
+        
+            </button>
+          )}
         </div>
         
         {/* IP Error */}
@@ -291,7 +334,7 @@ export function MessageInput({
           placeholder="输入您的消息内容... (按 Enter 发送，Shift+Enter 换行)"
           value={messageContent}
           onChange={handleMessageContentChange}
-          onKeyPress={handleTextareaKeyPress}
+          onKeyDown={handleTextareaKeyDown}
           className={`w-full px-3 py-2.5 md:py-2 text-base md:text-sm border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none min-h-[100px] md:min-h-[80px] max-h-[200px] ${
             messageError ? 'border-red-500' : 'border-gray-300'
           }`}
@@ -311,6 +354,40 @@ export function MessageInput({
           </div>
         </div>
       </div>
+
+      {/* File Selector for Multimedia Messages */}
+      {onSendMultimediaMessage && (
+        <div>
+          <label className="block text-xs md:text-sm font-medium text-gray-700 mb-2">
+            或发送多媒体文件
+          </label>
+          <FileSelector
+            onFileSelected={handleFileSelected}
+            isUploading={isFileUploading || false}
+            disabled={!isConnected || isSending || isLoading || !targetIP.trim() || !validateIPAddress(targetIP.trim())}
+            acceptedTypes={['image/jpeg', 'image/png', 'image/gif', 'video/mp4', 'video/quicktime']}
+            maxFileSize={10 * 1024 * 1024}
+          />
+          {fileUploadError && (
+            <div className="flex items-start space-x-2 p-3 mt-2 bg-red-50 border border-red-200 rounded-md">
+              <svg
+                className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
+              </svg>
+              <span className="text-xs text-red-700">{fileUploadError}</span>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Send Button */}
       <div className="flex justify-end">

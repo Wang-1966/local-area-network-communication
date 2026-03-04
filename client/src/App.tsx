@@ -32,19 +32,31 @@ function AppContent() {
   const [selectedUserIP, setSelectedUserIP] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isFileUploading, setIsFileUploading] = useState(false);
 
   /**
    * Initialize WebSocket connection and event listeners
    */
   useEffect(() => {
+    console.log('App useEffect: Initializing WebSocket connection');
+    
+    // Set status to connecting immediately
+    setConnectionStatus({
+      status: 'connecting',
+      connectedAt: undefined,
+    });
+    
     // Connect to WebSocket server
     websocketService.connect();
 
     // Register event listeners
     websocketService.on('connected', handleConnected);
     websocketService.on('newMessage', handleNewMessage);
+    websocketService.on('newMultimediaMessage', handleNewMessage); // 多媒体消息也用同样的处理
     websocketService.on('messageSent', handleMessageSent);
+    websocketService.on('multimediaMessageSent', handleMessageSent); // 多媒体消息发送确认
     websocketService.on('messageError', handleMessageError);
+    websocketService.on('multimediaMessageError', handleMessageError); // 多媒体消息错误
     websocketService.on('onlineUsersUpdate', handleOnlineUsersUpdate);
     websocketService.on('userJoined', handleUserJoined);
     websocketService.on('userLeft', handleUserLeft);
@@ -53,12 +65,18 @@ function AppContent() {
     websocketService.on('disconnect', handleDisconnect);
     websocketService.on('error', handleError);
 
+    console.log('App useEffect: Event listeners registered');
+
     // Cleanup on unmount
     return () => {
+      console.log('App useEffect cleanup: Removing event listeners and disconnecting');
       websocketService.off('connected', handleConnected);
       websocketService.off('newMessage', handleNewMessage);
+      websocketService.off('newMultimediaMessage', handleNewMessage);
       websocketService.off('messageSent', handleMessageSent);
+      websocketService.off('multimediaMessageSent', handleMessageSent);
       websocketService.off('messageError', handleMessageError);
+      websocketService.off('multimediaMessageError', handleMessageError);
       websocketService.off('onlineUsersUpdate', handleOnlineUsersUpdate);
       websocketService.off('userJoined', handleUserJoined);
       websocketService.off('userLeft', handleUserLeft);
@@ -74,6 +92,7 @@ function AppContent() {
    * Handle successful connection
    */
   const handleConnected = (data: any) => {
+    console.log('=== handleConnected called ===');
     console.log('Connected to server:', data);
     setCurrentUser(data.user);
     setOnlineUsers(data.onlineUsers || []);
@@ -204,6 +223,7 @@ function AppContent() {
    * Handle WebSocket connect
    */
   const handleConnect = () => {
+    console.log('=== handleConnect called (Socket.io connect event) ===');
     console.log('WebSocket connected');
     setConnectionStatus({
       status: 'connected',
@@ -216,6 +236,7 @@ function AppContent() {
    * Handle WebSocket disconnect
    */
   const handleDisconnect = (reason: string) => {
+    console.log('=== handleDisconnect called ===');
     console.log('WebSocket disconnected:', reason);
     setConnectionStatus({
       status: 'disconnected',
@@ -235,6 +256,7 @@ function AppContent() {
    */
   const handleSendMessage = async (targetUserIP: string, content: string) => {
     try {
+      console.log('[App] handleSendMessage: Setting isLoading to true');
       setIsLoading(true);
       setErrorMessage('');
 
@@ -243,11 +265,58 @@ function AppContent() {
 
       // Send message via WebSocket with the message ID
       websocketService.sendMessage(targetUserIP, content, pendingMessage.id);
+      
+      // Reset loading state after a short delay to prevent stuck state
+      setTimeout(() => {
+        console.log('[App] handleSendMessage: Setting isLoading to false after timeout');
+        setIsLoading(false);
+      }, 500);
     } catch (error) {
       console.error('Error sending message:', error);
       setErrorMessage('发送消息失败，请检查网络连接');
-    } finally {
+      console.log('[App] handleSendMessage: Setting isLoading to false after error');
       setIsLoading(false);
+    }
+  };
+
+  /**
+   * Handle send multimedia message (file upload)
+   */
+  const handleSendMultimediaMessage = async (targetUserIP: string, file: File) => {
+    try {
+      setIsFileUploading(true);
+      setErrorMessage('');
+
+      // Upload file to server
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const response = await fetch('/files/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Upload failed: ${response.statusText}`);
+      }
+
+      const uploadResult = await response.json();
+      const fileId = uploadResult.fileId;
+
+      if (!fileId) {
+        throw new Error('No file ID returned from server');
+      }
+
+      // Send multimedia message via WebSocket
+      // Note: We don't create a pending message here because the server will create the full message
+      websocketService.sendMultimediaMessage(targetUserIP, fileId);
+    } catch (error) {
+      console.error('Error sending multimedia message:', error);
+      const errorMsg = error instanceof Error ? error.message : '文件上传失败';
+      setErrorMessage(errorMsg);
+      throw error;
+    } finally {
+      setIsFileUploading(false);
     }
   };
 
@@ -313,10 +382,12 @@ function AppContent() {
           <div className="flex-shrink-0">
             <MessageInput
               onSendMessage={handleSendMessage}
+              onSendMultimediaMessage={handleSendMultimediaMessage}
               onlineUsers={state.onlineUsers}
               isConnected={state.connectionStatus.status === 'connected'}
               selectedUserIP={selectedUserIP}
               isLoading={isLoading}
+              isFileUploading={isFileUploading}
             />
           </div>
         </div>
